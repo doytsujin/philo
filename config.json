@@ -1,0 +1,22 @@
+{
+    "serverPort": 8080,
+    "diagnosticPort": 8081,
+    "logLevel": "info",
+    "maxConnections": 100,
+    "maxStackSize": 100,
+    "staleConnectionPeriodSeconds":10,
+    "logging": {
+        "production" : {
+            "logLevel":"error",
+            "logConsole":false
+        },
+        "testing" : {
+            "logLevel":"info",
+            "logConsole":false
+        },
+        "development" : {
+            "logLevel":"verbose",
+            "logConsole":true
+        }
+    }
+}
