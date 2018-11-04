@@ -5,6 +5,7 @@
     "maxConnections": 100,
     "maxStackSize": 100,
     "staleConnectionPeriodSeconds":10,
+    "logDirectory": "./logs",
     "logging": {
         "production" : {
             "logLevel":"error",

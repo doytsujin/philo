@@ -1,45 +1,71 @@
 //
-// Implementing in node.js
-// net is standard with node
-// Install winston logging package with 'npm install winston'
+// Server code based primarily on node's TCP and Buffer libraries
 //
 var net = require('net');
+
+// Read and log our configuration, adding console if specified
+// Alternatively could offer command-line overrides, and also 
+// do configuration via environment, e.g. production, testing, development
+const config = require('./config.json');
+const environment = process.env.NODE_ENV || 'development';
+
+// Get timestamp for naming file
+var now = new Date();
 
 // Winston is our logger, write to file
 // Always start off with log level info so that the basics are logged
 var winston = require('winston');
 var logger = winston.createLogger({
   level: 'info',
-  format: winston.format.simple(),
+  format: winston.format.combine( 
+      winston.format.timestamp(),
+      winston.format.splat(), 
+      winston.format.simple(),
+      winston.format.printf(info => `${info.timestamp} ${info.level}: ${info.message}`)
+  ),
   transports: [
-    new winston.transports.File({ filename: 'posterity.log' }),
+    new winston.transports.File({ filename: config.logDirectory + '/server.log.' + now.toISOString()}),
   ]
 });
 
-// read and log our configuration, adding console if specified
-// Alternatively could offer command-line overrides, and also 
-// do configuration via environment, e.g. production, testing, development
-const config = require('./config.json');
-const environment = process.env.NODE_ENV || 'development';
+// Set up the console if asked for
 const logging = config.logging[environment];
-
 if ( logging.logConsole ) {
-  logger.add(new winston.transports.Console({
-    format: winston.format.simple()
-  }));
+  logger.add(new winston.transports.Console());
 }
-logger.info("Dumping config file: " + JSON.stringify(config));
-logger.info("Configured as {" + environment + "} ");
+
+// Log some basics
+logger.info("Config file: " + JSON.stringify(config));
+logger.info("Environment configured as " + environment);
 logger.info("Setting log level to " + logging.logLevel);
 logger.level = logging.logLevel;
 
+// Our filo stack
 var filo = [];
 
 // Create application server, invoked on client connect
 var server = net.createServer(function(client) {
     var clientInfo = client.address();
-    logger.info('TCP client connect on address : ' + JSON.stringify(clientInfo));
+    logger.info('Client connected: ' + JSON.stringify(clientInfo));
+    // This ensures we are reading binary data
     client.setEncoding(null);
+
+    // Get current connections count.
+    var count;
+    server.getConnections(function (error, count) {
+        if ( error ) {
+            logger.error(JSON.stringify(err));
+        } else {
+            // Print current connection count in server console.
+            logger.verbose('There are ' + count + ' connections now. ');
+        }
+    });
+
+    // Send busy byte 0xFF if we are maxed out of connections
+    if (count >= config.maxConnections) {
+        logger.warn("Too many connections ... returning busy byte");
+        client.end(Buffer.alloc(1, 0xFF));
+    }
 
     //client.setTimeout(1000);
 
@@ -51,18 +77,8 @@ var server = net.createServer(function(client) {
 	var buffer = Buffer.from(data);
         logger.verbose('Received ' + bytesRead + ' bytes: [' + buffer.toString('hex', 0, bytesRead) + ']');
 
-        // If msb is 0 then this is a push, else a pop
-        if ( !(buffer[0] & 0x80) ) {
-            // This is a push
-	    // If this is a push, get the length and push the rest of this onto the FILO
-            var length = buffer[0] & 0x7F;
-            filo.push(buffer.slice(1, length+1));
-            logger.verbose('Pushed ' + length + ' byte payload onto FILO. ' +
-                           'FILO now has ' + filo.length + ' elements');
-
-            // Push sends 0x00 back to client
-            client.end(Buffer.alloc(1, 0));
-        } else {
+        // If msb is 1 then this is a pop, else a push
+        if ( buffer[0] & 0x80 ) {
             // This is a pop
             var payload = filo.pop();
             var length = payload.length;
@@ -78,6 +94,21 @@ var server = net.createServer(function(client) {
 
             logger.verbose('Sending response: [' + sendBuffer.toString('hex') + ']');
             client.end(sendBuffer);
+        } else {
+            // This is a push
+	    // If this is a push, get the length and push the rest of this onto the FILO
+            var length = buffer[0] & 0x7F;
+            filo.push(buffer.slice(1, length+1));
+            logger.verbose('Pushed ' + length + ' byte payload onto FILO. ' +
+                           'FILO now has ' + filo.length + ' elements');
+
+            // handle reads broken up over writes
+            if ((bytesRead-1) != length) {
+                logger.warn("payload size mismatch - expected %d bytes, got %d bytes", length, bytesRead-1);
+            }
+
+            // Push sends 0x00 back to client
+            client.end(Buffer.alloc(1, 0));
         }
 
     });
@@ -115,7 +146,7 @@ server.listen(config.serverPort, function () {
     var serverInfo = server.address();
     var serverInfoJson = JSON.stringify(serverInfo);
 
-    logger.info('TCP server listen on address : ' + serverInfoJson);
+    logger.info('TCP server listen on address: ' + serverInfoJson);
 
     server.on('close', function () {
         logger.info('TCP server socket is closed.');
@@ -125,5 +156,7 @@ server.listen(config.serverPort, function () {
         logger.error('Server error: ' + JSON.stringify(error));
     });
 
+}).on('error', function(error) {
+        logger.error('Server listen error: ' + JSON.stringify(error));
 });
 
