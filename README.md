@@ -4,9 +4,11 @@
 # net module is standard with node
 #
 # Installation Instructions
-# 1. Install winston logging package with 'npm install winston'
-# 2. Customize your config.json
-# 3. Make sure directory for logDirctory exists
+# 1. Install following dependencies:
+#    - npm install winston
+#    - npm install semaphore
+# 3. Customize your config.json
+# 4. Make sure directory for logDirctory exists
 # 
 # Tested on macOS with the following:
 # - node v10.13.0

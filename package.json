@@ -1,0 +1,25 @@
+{
+  "name": "philo",
+  "version": "1.0.0",
+  "description": "Philo's stack test",
+  "main": "server.js",
+  "dependencies": {
+    "semaphore": "^1.1.0",
+    "winston": "^3.1.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "ruby stack-test.rb",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/markhary/philo.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/markhary/philo/issues"
+  },
+  "homepage": "https://github.com/markhary/philo#readme"
+}
