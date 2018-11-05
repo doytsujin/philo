@@ -43,18 +43,24 @@ logger.level = logging.logLevel;
 // Our filo stack
 var filo = [];
 
+//
+// main
+//
+
 // Create application server, invoked on client connect
 var server = net.createServer(function(client) {
     var clientInfo = client.address();
     logger.info('Client connected: ' + JSON.stringify(clientInfo));
+
     // This ensures we are reading binary data
     client.setEncoding(null);
+    client.setTimeout(1000);
 
     // Get current connections count.
     var count;
     server.getConnections(function (error, count) {
         if ( error ) {
-            logger.error(JSON.stringify(err));
+            logger.error(JSON.stringify(error));
         } else {
             // Print current connection count in server console.
             logger.verbose('There are ' + count + ' connections now. ');
@@ -67,7 +73,10 @@ var server = net.createServer(function(client) {
         client.end(Buffer.alloc(1, 0xFF));
     }
 
-    //client.setTimeout(1000);
+    var state = 'start';
+    var payloadBytesRead = 0;
+    var payloadLength = 0;
+    var payloadList = [];
 
     // Process data
     client.on('data', function (data) {
@@ -75,10 +84,12 @@ var server = net.createServer(function(client) {
 	// Check if amount of data sent matches expected amount of data sent
         var bytesRead = client.bytesRead;
 	var buffer = Buffer.from(data);
-        logger.verbose('Received ' + bytesRead + ' bytes: [' + buffer.toString('hex', 0, bytesRead) + ']');
+        logger.verbose('Received ' + bytesRead + ' bytes: [' + buffer.toString('hex') + ']');
 
         // If msb is 1 then this is a pop, else a push
-        if ( buffer[0] & 0x80 ) {
+        if ( (state == 'start') && (buffer[0] & 0x80)) {
+            state = 'pop';
+
             // This is a pop
             var payload = filo.pop();
             var length = payload.length;
@@ -94,38 +105,56 @@ var server = net.createServer(function(client) {
 
             logger.verbose('Sending response: [' + sendBuffer.toString('hex') + ']');
             client.end(sendBuffer);
-        } else {
-            // This is a push
-	    // If this is a push, get the length and push the rest of this onto the FILO
-            var length = buffer[0] & 0x7F;
-            filo.push(buffer.slice(1, length+1));
-            logger.verbose('Pushed ' + length + ' byte payload onto FILO. ' +
-                           'FILO now has ' + filo.length + ' elements');
-
-            // handle reads broken up over writes
-            if ((bytesRead-1) != length) {
-                logger.warn("payload size mismatch - expected %d bytes, got %d bytes", length, bytesRead-1);
+        } else if (state == 'push') {
+            // handle serialized pushes
+            payloadList.push(buffer);
+            payloadBytesRead += bytesRead;
+            if (payloadBytesRead >= payloadLength) {
+                state = 'done';
             }
+        } else if (state == 'start') {
+            // This is a push.  Only set it up the first time.
+            state = 'push';
 
-            // Push sends 0x00 back to client
-            client.end(Buffer.alloc(1, 0));
+	    // If this is a push, get the length and push the rest of this onto the FILO
+            payloadLength = buffer[0] & 0x7F;
+            payloadList.push(buffer.slice(1, payloadLength+1));
+            // Header is 1 byte, so payloadBytesRead is one less than total bytes read
+            payloadBytesRead = bytesRead-1;
+
+            // Some pushes may be complete the first time
+            if (payloadBytesRead >= payloadLength) {
+                state = 'done';
+            } else {
+                logger.info("payload serialized - got %d of %d bytes", payloadBytesRead, payloadLength);
+            }
+        } else {
+            logger.error("Unknown state on data: " + state + ". Cowardly ignoring data but continuing.");
         }
 
+        if (state == 'done') {
+            var combinedPayload = Buffer.concat(payloadList);
+            filo.push(combinedPayload);
+            logger.verbose('Pushed ' + combinedPayload.length + ' byte payload onto FILO. ' +
+                           'FILO now has ' + filo.length + ' elements');
+            // Push sends 0x00 back to client when we are done
+            client.end(Buffer.alloc(1, 0));
+        }
     });
 
     // When client send data complete.
     client.on('end', function () {
-        var message = 'Client disconnected: ';
+        var message = 'Client disconnected. State was ' + state;
 
         // Get current connections count.
         server.getConnections(function (error, count) {
             if ( error ) {
-                logger.error(message + JSON.stringify(err));
+                logger.error(message + JSON.stringify(error));
             } else {
                 // Print current connection count in server console.
-                logger.verbose(message + 'There are ' + count + ' connections now. ');
+                message += ' There are ' + count + ' connections now.';
+                logger.verbose(message);
             }
-
         });
     });
 
