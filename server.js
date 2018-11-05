@@ -61,7 +61,13 @@ var appServer = net.createServer(function(client) {
     // This ensures we are reading binary data
     client.setEncoding(null);
     //client.setTimeout(1000);
-
+  //
+    // Initialize variables used to manage stack and state
+    var state = 'start';
+    var payloadBytesRead = 0;
+    var payloadLength = 0;
+    var payloadList = [];
+  
     // Check and handle connections
     // Direct access to this object is deprecated but still supported as of node v10.13.0, going
     // to be lazy and use it.
@@ -71,12 +77,9 @@ var appServer = net.createServer(function(client) {
     if (connections >= config.maxConnections) {
         logger.warn("Too many connections [%d >= %d] ... returning busy byte", connections, config.maxConnections);
         client.end(Buffer.alloc(1, 0xFF));
+        state = "busy";
     }
 
-    var state = 'start';
-    var payloadBytesRead = 0;
-    var payloadLength = 0;
-    var payloadList = [];
 
     // Process data
     client.on('data', function (data) {
@@ -131,6 +134,8 @@ var appServer = net.createServer(function(client) {
             } else {
                 logger.info("payload serialized - got %d of %d bytes", payloadBytesRead, payloadLength);
             }
+        } else if (state == 'busy') {
+            // Going to ignore the data and let this die
         } else {
             logger.error("Unknown state on data: " + state + ". Cowardly ignoring data but continuing.");
         }
@@ -187,12 +192,14 @@ appServer.listen(config.serverPort, function () {
 // Create the diagnostic server listening on the specified port
 var diagnosticServer = net.createServer(function(client) {
     var diagnosticInformation = {
-        appServerConnections:appServer.connections,
-        FILOStackSize:gFILO.length
+        "appServerConnections":appServer.connections,
+        "FILOStackSize":gFILO.length
     }
+
     var diagnosticInformationJSON = JSON.stringify(diagnosticInformation);
-    logger.info("Diagnostic server connections.  Sending data and closing connection. " + diagnosticInformationJSON);
-    client.end(diagnosticInformationJSON + '\n');
+    logger.verbose("Diagnostic server connections.  Sending data and closing connection. " + 
+                   diagnosticInformationJSON);
+    client.end(diagnosticInformationJSON);
 
     // When client send data complete.
     client.on('end', function () {
