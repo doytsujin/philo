@@ -1,8 +1,6 @@
 //
 // Server code based primarily on node's TCP and Buffer libraries
 //
-var net = require('net');
-
 // Read and log our configuration, adding console if specified
 // Alternatively could offer command-line overrides, and also 
 // do configuration via environment, e.g. production, testing, development
@@ -11,6 +9,9 @@ const environment = process.env.NODE_ENV || 'development';
 
 // Get timestamp for naming file
 var now = new Date();
+
+// Package to help manage unique ids for each client
+var uuidv4 = require('uuid/v4');
 
 // Winston is our logger, write to file
 // Always start off with log level info so that the basics are logged
@@ -41,36 +42,36 @@ logger.info("Setting log level to " + logging.logLevel);
 logger.level = logging.logLevel;
 
 // Our filo stack
-var filo = [];
+var gFILO = [];
+
+// Our client list
+var gClientList = [];
 
 //
 // main
 //
 
 // Create application server, invoked on client connect
-var server = net.createServer(function(client) {
+var net = require('net');
+var appServer = net.createServer(function(client) {
     var clientInfo = client.address();
     var message = 'Client connected: ' + JSON.stringify(clientInfo);
+    var myUUID = uuidv4();
 
     // This ensures we are reading binary data
     client.setEncoding(null);
     //client.setTimeout(1000);
 
-    // Get current connections count.
-    server.getConnections(function (error, count) {
-        if ( error ) {
-            logger.error("Connected - Could not get number of connections: " + JSON.stringify(error));
-        } else {
-            // Print current connection count in server console.
-            message += ' There are ' + count + ' connections now. ';
-            logger.verbose(message);
-            if (count >= config.maxConnections) {
-                logger.warn("Too many connections [%d >= %d] ... returning busy byte", count, config.maxConnections);
-                client.end(Buffer.alloc(1, 0xFF));
-            }
-
-        }
-    });
+    // Check and handle connections
+    // Direct access to this object is deprecated but still supported as of node v10.13.0, going
+    // to be lazy and use it.
+    var connections = appServer.connections;
+    message += ' There are ' + appServer.connections + ' connections now. ';
+    logger.verbose(message);
+    if (connections >= config.maxConnections) {
+        logger.warn("Too many connections [%d >= %d] ... returning busy byte", connections, config.maxConnections);
+        client.end(Buffer.alloc(1, 0xFF));
+    }
 
     var state = 'start';
     var payloadBytesRead = 0;
@@ -90,10 +91,10 @@ var server = net.createServer(function(client) {
             state = 'pop';
 
             // This is a pop
-            var payload = filo.pop();
+            var payload = gFILO.pop();
             var length = payload.length;
             logger.verbose('Popped ' + length + ' byte payload from FILO. ' +
-                           'FILO now has ' + filo.length + ' elements');
+                           'FILO now has ' + gFILO.length + ' elements');
 
             // create a buffer of length buffer.length + 1
             var sendBuffer = Buffer.alloc(length+1, 0);
@@ -122,6 +123,9 @@ var server = net.createServer(function(client) {
             payloadBytesRead = buffer.length-1;
 
             // Some pushes may be complete the first time
+            // Deliberately going to ignore cases where there is extra data waiting ... 
+            // Could happen if push and pop requests are truly serialized, but not
+            // going to handle that
             if (payloadBytesRead >= payloadLength) {
                 state = 'done';
             } else {
@@ -133,9 +137,9 @@ var server = net.createServer(function(client) {
 
         if (state == 'done') {
             var combinedPayload = Buffer.concat(payloadList);
-            filo.push(combinedPayload);
+            gFILO.push(combinedPayload);
             logger.verbose('Pushed ' + combinedPayload.length + ' byte payload onto FILO. ' +
-                           'FILO now has ' + filo.length + ' elements');
+                           'FILO now has ' + gFILO.length + ' elements');
             // Push sends 0x00 back to client when we are done
             client.end(Buffer.alloc(1, 0));
         }
@@ -144,17 +148,9 @@ var server = net.createServer(function(client) {
     // When client send data complete.
     client.on('end', function () {
         var message = 'Client disconnected. State was [' + state + ']. ';
-
-        // Get current connections count.
-        server.getConnections(function (error, count) {
-            if ( error ) {
-                logger.error(message + JSON.stringify(error));
-            } else {
-                // Print current connection count in server console.
-                message += ' There are ' + count + ' connections now.';
-                logger.verbose(message);
-            }
-        });
+        var connections = appServer.connections;
+        message += ' There are ' + appServer.connections + ' connections now. ';
+        logger.verbose(message);
     });
 
     // When client timeout.
@@ -168,23 +164,63 @@ var server = net.createServer(function(client) {
     })
 });
 
-// Create a TCP server listening on specified port
-server.listen(config.serverPort, function () {
+// Create the app server listening on the specified port
+appServer.listen(config.serverPort, function () {
     // Get server address info.
-    var serverInfo = server.address();
+    var serverInfo = appServer.address();
     var serverInfoJson = JSON.stringify(serverInfo);
 
-    logger.info('TCP server listen on address: ' + serverInfoJson);
+    logger.info('App server started: ' + serverInfoJson);
 
-    server.on('close', function () {
-        logger.info('TCP server socket is closed.');
+    appServer.on('close', function () {
+        logger.info('App server closed.');
     });
 
-    server.on('error', function (error) {
-        logger.error('Server error: ' + JSON.stringify(error));
+    appServer.on('error', function (error) {
+        logger.error('App server error: ' + JSON.stringify(error));
     });
 
 }).on('error', function(error) {
-        logger.error('Server listen error: ' + JSON.stringify(error));
+        logger.error('App server listen error: ' + JSON.stringify(error));
 });
 
+// Create the diagnostic server listening on the specified port
+var diagnosticServer = net.createServer(function(client) {
+    var diagnosticInformation = {
+        appServerConnections:appServer.connections,
+        FILOStackSize:gFILO.length
+    }
+    var diagnosticInformationJSON = JSON.stringify(diagnosticInformation);
+    logger.info("Diagnostic server connections.  Sending data and closing connection. " + diagnosticInformationJSON);
+    client.end(diagnosticInformationJSON + '\n');
+
+    // When client send data complete.
+    client.on('end', function () {
+        logger.verbose('Diagnostic connection closed');
+    });
+
+    // When client error.
+    client.on('error', function (error) {
+        logger.error('Diagnostic error: ' + JSON.stringify(error));
+    })
+});
+
+// Create the app server listening on the specified port
+diagnosticServer.listen(config.diagnosticPort, function () {
+    // Get server address info.
+    var serverInfo = diagnosticServer.address();
+    var serverInfoJson = JSON.stringify(serverInfo);
+
+    logger.info('Diagnostic server started: ' + serverInfoJson);
+
+    diagnosticServer.on('close', function () {
+        logger.info('Diagnostic server closed.');
+    });
+
+    diagnosticServer.on('error', function (error) {
+        logger.error('Diagnostic server error: ' + JSON.stringify(error));
+    });
+
+}).on('error', function(error) {
+        logger.error('Diagnostic server listen error: ' + JSON.stringify(error));
+});

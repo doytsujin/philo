@@ -6,7 +6,7 @@
 # Installation Instructions
 # 1. Install following dependencies:
 #    - npm install winston
-#    - npm install semaphore
+#    - npm install uuid
 # 3. Customize your config.json
 # 4. Make sure directory for logDirctory exists
 # 
