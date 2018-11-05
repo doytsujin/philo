@@ -82,9 +82,9 @@ var server = net.createServer(function(client) {
     client.on('data', function (data) {
         // Print received client data and length.
 	// Check if amount of data sent matches expected amount of data sent
-        var bytesRead = client.bytesRead;
+
 	var buffer = Buffer.from(data);
-        logger.verbose('Received ' + bytesRead + ' bytes: [' + buffer.toString('hex') + ']');
+        logger.verbose('Received ' + buffer.length + ' bytes: [' + buffer.toString('hex') + ']');
 
         // If msb is 1 then this is a pop, else a push
         if ( (state == 'start') && (buffer[0] & 0x80)) {
@@ -108,7 +108,7 @@ var server = net.createServer(function(client) {
         } else if (state == 'push') {
             // handle serialized pushes
             payloadList.push(buffer);
-            payloadBytesRead += bytesRead;
+            payloadBytesRead += buffer.length;
             if (payloadBytesRead >= payloadLength) {
                 state = 'done';
             }
@@ -120,7 +120,7 @@ var server = net.createServer(function(client) {
             payloadLength = buffer[0] & 0x7F;
             payloadList.push(buffer.slice(1, payloadLength+1));
             // Header is 1 byte, so payloadBytesRead is one less than total bytes read
-            payloadBytesRead = bytesRead-1;
+            payloadBytesRead = buffer.length-1;
 
             // Some pushes may be complete the first time
             if (payloadBytesRead >= payloadLength) {
@@ -144,7 +144,7 @@ var server = net.createServer(function(client) {
 
     // When client send data complete.
     client.on('end', function () {
-        var message = 'Client disconnected. State was ' + state;
+        var message = 'Client disconnected. State was [' + state + "].;
 
         // Get current connections count.
         server.getConnections(function (error, count) {
