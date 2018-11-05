@@ -16,7 +16,7 @@
             "logConsole":false
         },
         "development" : {
-            "logLevel":"verbose",
+            "logLevel":"silly",
             "logConsole":true
         }
     }

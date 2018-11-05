@@ -50,28 +50,27 @@ var filo = [];
 // Create application server, invoked on client connect
 var server = net.createServer(function(client) {
     var clientInfo = client.address();
-    logger.info('Client connected: ' + JSON.stringify(clientInfo));
+    var message = 'Client connected: ' + JSON.stringify(clientInfo);
 
     // This ensures we are reading binary data
     client.setEncoding(null);
-    client.setTimeout(1000);
+    //client.setTimeout(1000);
 
     // Get current connections count.
-    var count;
     server.getConnections(function (error, count) {
         if ( error ) {
-            logger.error(JSON.stringify(error));
+            logger.error("Connected - Could not get number of connections: " + JSON.stringify(error));
         } else {
             // Print current connection count in server console.
-            logger.verbose('There are ' + count + ' connections now. ');
+            message += ' There are ' + count + ' connections now. ';
+            logger.verbose(message);
+            if (count >= config.maxConnections) {
+                logger.warn("Too many connections [%d >= %d] ... returning busy byte", count, config.maxConnections);
+                client.end(Buffer.alloc(1, 0xFF));
+            }
+
         }
     });
-
-    // Send busy byte 0xFF if we are maxed out of connections
-    if (count >= config.maxConnections) {
-        logger.warn("Too many connections ... returning busy byte");
-        client.end(Buffer.alloc(1, 0xFF));
-    }
 
     var state = 'start';
     var payloadBytesRead = 0;
