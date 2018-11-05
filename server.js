@@ -144,7 +144,7 @@ var server = net.createServer(function(client) {
 
     // When client send data complete.
     client.on('end', function () {
-        var message = 'Client disconnected. State was [' + state + "].;
+        var message = 'Client disconnected. State was [' + state + ']. ';
 
         // Get current connections count.
         server.getConnections(function (error, count) {
