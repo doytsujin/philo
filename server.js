@@ -304,6 +304,14 @@ diagnosticServer.listen(config.diagnosticPort, function () {
 
 // Capture SIGINT and SIGKILL for a clean exit
 function shutdown() {
+    var diagnosticInformation = {
+        "appServerConnections":appServer.connections,
+        "LIFOStackSize":gLIFO.length
+    }
+
+    var diagnosticInformationJSON = JSON.stringify(diagnosticInformation);
+    logger.verbose("Final tallies: " + diagnosticInformationJSON);
+
     appServer.close();
     diagnosticServer.close();
 }
