@@ -4,11 +4,15 @@
 # net module is standard with node
 #
 # Installation Instructions
-# 1. Install following dependencies:
-#    - npm install winston
-#    - npm install uuid
-# 3. Customize your config.json
-# 4. Make sure directory for logDirctory exists
+#   1. Install following dependencies:
+#      - npm install winston
+#      - npm install uuid
+#   2. Customize your config.json
+#   3. Make sure directory for logDirctory exists, e.g. prompt> mkdir logs/
+#
+# Execution Instructions
+#   1. Configure your NODE_ENV for the right level, e.g. prompt> export NODE_ENV=debugging
+#   2. Execute the code, e.g. prompt> node server.js
 # 
 # Tested on macOS with the following:
 # - node v10.13.0

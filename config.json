@@ -16,6 +16,10 @@
             "logConsole":false
         },
         "development" : {
+            "logLevel":"verbose",
+            "logConsole":true
+        },
+        "debugging" : {
             "logLevel":"silly",
             "logConsole":true
         }

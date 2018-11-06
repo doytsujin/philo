@@ -1,11 +1,12 @@
 'use strict';
 
 //
-// Server code based primarily on node's TCP and Buffer libraries
+// Server code made easy due to node's TCP and Buffer libraries
 //
 // Read and log our configuration, adding console if specified
 // Alternatively could offer command-line overrides, and also 
 // do configuration via environment, e.g. production, testing, development
+//
 const config = require('./config.json');
 const environment = process.env.NODE_ENV || 'development';
 
@@ -43,47 +44,43 @@ logger.info("Environment configured as " + environment);
 logger.info("Setting log level to " + logging.logLevel);
 logger.level = logging.logLevel;
 
+//////////////////////////////////////////////
+// Global variables
+//////////////////////////////////////////////
+
 // Our LIFO stack
 var gLIFO = [];
 
 // Our client list
 var gClients = {};
 
+
 //////////////////////////////////////////////
 // Functions
 //////////////////////////////////////////////
 
-
 //
 // \fn bool oldClientDeleted
 // \brief Go through gClients object, find the oldest object, determine if it is older than allowed, and delete it
-// \param doDelete Actually delete the object if doDelete is true, otherwise just be vocal about it
 //
 
-function disconnectOldClient(doDelete) {
+function disconnectOldClient() {
     var disconnected = false;
-    if (!doDelete) {
-        logger.warn("doDelete is false, you are debugging, turn it to true");
-    }
 
+    // sort the objects oldest to newest timestamp, with oldest at index 0.
+    // TODO - optimize
     var sorted = Object.keys(gClients).sort(function(a,b){return gClients[a].timestamp-gClients[b].timestamp})
-    logger.silly('Sorted list: ' + JSON.stringify(sorted));
     
     var earliestUUID = sorted[0];
     var earliestDate = gClients[earliestUUID].timestamp;
     var now = new Date();
     var elapsedTimeSeconds = (now-earliestDate)/1000;
-    logger.silly('Elapsed time: %d ms - %d ms = %f s', now, earliestDate, elapsedTimeSeconds);
+    logger.verbose('Elapsed time: %d ms - %d ms = %f s', now, earliestDate, elapsedTimeSeconds);
 
     if ( elapsedTimeSeconds > config.staleConnectionPeriodSeconds ) {
         logger.verbose('Disconnecting client.counter = ' + gClients[earliestUUID].counter);
         gClients[earliestUUID].client.end();
         disconnected = true;
-    }
-
-    if ( !doDelete ) {
-        // We don't want to actually delete it, but act as if we were going to
-        return false;
     }
 
     return disconnected;
@@ -122,7 +119,7 @@ var appServer = net.createServer(function(client) {
     if ( connections > config.maxConnections) {
         // Check if there are any old connections.  If yes, then delete it and make space.  Otherwise
         // return a busy byte
-        if ( !disconnectOldClient(true) ) {
+        if ( !disconnectOldClient() ) {
             logger.warn("Too many connections [%d >= %d] ... returning busy byte", 
                         connections, config.maxConnections);
             client.end(Buffer.alloc(1, 0xFF));
@@ -146,7 +143,7 @@ var appServer = net.createServer(function(client) {
 	// Check if amount of data sent matches expected amount of data sent
 
 	var buffer = Buffer.from(data);
-        logger.verbose('Received ' + buffer.length + ' bytes: [' + buffer.toString('hex') + ']');
+        logger.silly(myUUID + ':: Received ' + buffer.length + ' bytes: [' + buffer.toString('hex') + ']');
 
         // If msb is 1 then this is a pop, else a push
         if ( (state == 'start') && (buffer[0] & 0x80)) {
@@ -154,7 +151,7 @@ var appServer = net.createServer(function(client) {
 
             var payload = gLIFO.pop();
             var length = payload.length;
-            logger.verbose('Popped ' + length + ' byte payload from LIFO. ' +
+            logger.verbose(myUUID + ':: Popped ' + length + ' byte payload from LIFO. ' +
                            'LIFO now has ' + gLIFO.length + ' elements');
 
             // create a buffer of length buffer.length + 1
@@ -164,7 +161,7 @@ var appServer = net.createServer(function(client) {
             // copy sendBuffer into payload starting at payload[1]
             payload.copy(sendBuffer, 1);
 
-            logger.verbose('Sending response: [' + sendBuffer.toString('hex') + ']');
+            logger.verbose(myUUID + ':: Sending response: [' + sendBuffer.toString('hex') + ']');
             client.end(sendBuffer);
         } else if (state == 'push') {
             // handle serialized pushes
@@ -190,18 +187,20 @@ var appServer = net.createServer(function(client) {
             if (payloadBytesRead >= payloadLength) {
                 state = 'done';
             } else {
-                logger.info("payload serialized - got %d of %d bytes", payloadBytesRead, payloadLength);
+                logger.silly(myUUID + ':: payload serialized - got %d of %d bytes', 
+                             payloadBytesRead, payloadLength);
             }
         } else if (state == 'busy') {
             // Going to ignore the data and let this die
         } else {
-            logger.error("Unknown state on data: " + state + ". Cowardly ignoring data but continuing.");
+            logger.error(myUUID + ':: Unknown state on data: ' + state + 
+                         '. Cowardly ignoring data but continuing.');
         }
 
         if (state == 'done') {
             var combinedPayload = Buffer.concat(payloadList);
             gLIFO.push(combinedPayload);
-            logger.verbose('Pushed ' + combinedPayload.length + ' byte payload onto LIFO. ' +
+            logger.verbose(myUUID + ':: Pushed ' + combinedPayload.length + ' byte payload onto LIFO. ' +
                            'LIFO now has ' + gLIFO.length + ' elements');
             // Push sends 0x00 back to client when we are done
             client.end(Buffer.alloc(1, 0));
@@ -301,4 +300,23 @@ diagnosticServer.listen(config.diagnosticPort, function () {
 
 }).on('error', function(error) {
         logger.error('Diagnostic server listen error: ' + JSON.stringify(error));
+});
+
+// Capture SIGINT and SIGKILL for a clean exit
+function shutdown() {
+    appServer.close();
+    diagnosticServer.close();
+}
+
+process.on('SIGTERM', function() {
+    logger.warn('SIGTERM captured, shutting down...');
+    shutdown();
+});
+process.on('SIGINT', function() {
+    logger.warn('SIGINT captured, shutting down...');
+    shutdown();
+});
+process.on('uncaughtException', function() {
+    logger.warn('uncaughtException captured, shutting down...');
+    shutdown();
 });
