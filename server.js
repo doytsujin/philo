@@ -1,3 +1,5 @@
+'use strict';
+
 //
 // Server code based primarily on node's TCP and Buffer libraries
 //
@@ -8,10 +10,10 @@ const config = require('./config.json');
 const environment = process.env.NODE_ENV || 'development';
 
 // Get timestamp for naming file
-var now = new Date();
+var gTimestamp = new Date();
 
 // Package to help manage unique ids for each client
-var uuidv4 = require('uuid/v4');
+const uuidv4 = require('uuid/v4');
 
 // Winston is our logger, write to file
 // Always start off with log level info so that the basics are logged
@@ -25,7 +27,7 @@ var logger = winston.createLogger({
       winston.format.printf(info => `${info.timestamp} ${info.level}: ${info.message}`)
   ),
   transports: [
-    new winston.transports.File({ filename: config.logDirectory + '/server.log.' + now.toISOString()}),
+    new winston.transports.File({ filename: config.logDirectory + '/server.log.' + gTimestamp.toISOString()}),
   ]
 });
 
@@ -41,15 +43,57 @@ logger.info("Environment configured as " + environment);
 logger.info("Setting log level to " + logging.logLevel);
 logger.level = logging.logLevel;
 
-// Our filo stack
-var gFILO = [];
+// Our LIFO stack
+var gLIFO = [];
 
 // Our client list
-var gClientList = [];
+var gClients = {};
+
+//////////////////////////////////////////////
+// Functions
+//////////////////////////////////////////////
+
 
 //
-// main
+// \fn bool oldClientDeleted
+// \brief Go through gClients object, find the oldest object, determine if it is older than allowed, and delete it
+// \param doDelete Actually delete the object if doDelete is true, otherwise just be vocal about it
 //
+
+function disconnectOldClient(doDelete) {
+    var disconnected = false;
+    if (!doDelete) {
+        logger.warn("doDelete is false, you are debugging, turn it to true");
+    }
+
+    var sorted = Object.keys(gClients).sort(function(a,b){return gClients[a].timestamp-gClients[b].timestamp})
+    logger.silly('Sorted list: ' + JSON.stringify(sorted));
+    
+    var earliestUUID = sorted[0];
+    var earliestDate = gClients[earliestUUID].timestamp;
+    var now = new Date();
+    var elapsedTimeSeconds = (now-earliestDate)/1000;
+    logger.silly('Elapsed time: %d ms - %d ms = %f s', now, earliestDate, elapsedTimeSeconds);
+
+    if ( elapsedTimeSeconds > config.staleConnectionPeriodSeconds ) {
+        logger.verbose('Disconnecting client.counter = ' + gClients[earliestUUID].counter);
+        gClients[earliestUUID].client.end();
+        disconnected = true;
+    }
+
+    if ( !doDelete ) {
+        // We don't want to actually delete it, but act as if we were going to
+        return false;
+    }
+
+    return disconnected;
+}
+
+
+//////////////////////////////////////////////
+// main
+//////////////////////////////////////////////
+var gCounter = 0;
 
 // Create application server, invoked on client connect
 var net = require('net');
@@ -57,11 +101,12 @@ var appServer = net.createServer(function(client) {
     var clientInfo = client.address();
     var message = 'Client connected: ' + JSON.stringify(clientInfo);
     var myUUID = uuidv4();
+    var now = new Date();
 
     // This ensures we are reading binary data
     client.setEncoding(null);
     //client.setTimeout(1000);
-  //
+
     // Initialize variables used to manage stack and state
     var state = 'start';
     var payloadBytesRead = 0;
@@ -74,12 +119,26 @@ var appServer = net.createServer(function(client) {
     var connections = appServer.connections;
     message += ' There are ' + appServer.connections + ' connections now. ';
     logger.verbose(message);
-    if (connections >= config.maxConnections) {
-        logger.warn("Too many connections [%d >= %d] ... returning busy byte", connections, config.maxConnections);
-        client.end(Buffer.alloc(1, 0xFF));
-        state = "busy";
+    if ( connections > config.maxConnections) {
+        // Check if there are any old connections.  If yes, then delete it and make space.  Otherwise
+        // return a busy byte
+        if ( !disconnectOldClient(true) ) {
+            logger.warn("Too many connections [%d >= %d] ... returning busy byte", 
+                        connections, config.maxConnections);
+            client.end(Buffer.alloc(1, 0xFF));
+            state = "busy";
+        }
     }
 
+    // Add myself to the list of clients
+    if ( state == 'start' ) {
+        gClients[myUUID] =  {
+            "timestamp" : now,
+            "client" : client,
+            "counter" : gCounter++
+        };
+        logger.verbose('Added gClients[%s].timestamp = %d', myUUID, gClients[myUUID].timestamp);
+    }
 
     // Process data
     client.on('data', function (data) {
@@ -93,11 +152,10 @@ var appServer = net.createServer(function(client) {
         if ( (state == 'start') && (buffer[0] & 0x80)) {
             state = 'pop';
 
-            // This is a pop
-            var payload = gFILO.pop();
+            var payload = gLIFO.pop();
             var length = payload.length;
-            logger.verbose('Popped ' + length + ' byte payload from FILO. ' +
-                           'FILO now has ' + gFILO.length + ' elements');
+            logger.verbose('Popped ' + length + ' byte payload from LIFO. ' +
+                           'LIFO now has ' + gLIFO.length + ' elements');
 
             // create a buffer of length buffer.length + 1
             var sendBuffer = Buffer.alloc(length+1, 0);
@@ -119,7 +177,7 @@ var appServer = net.createServer(function(client) {
             // This is a push.  Only set it up the first time.
             state = 'push';
 
-	    // If this is a push, get the length and push the rest of this onto the FILO
+	    // If this is a push, get the length and push the rest of this onto the LIFO
             payloadLength = buffer[0] & 0x7F;
             payloadList.push(buffer.slice(1, payloadLength+1));
             // Header is 1 byte, so payloadBytesRead is one less than total bytes read
@@ -142,9 +200,9 @@ var appServer = net.createServer(function(client) {
 
         if (state == 'done') {
             var combinedPayload = Buffer.concat(payloadList);
-            gFILO.push(combinedPayload);
-            logger.verbose('Pushed ' + combinedPayload.length + ' byte payload onto FILO. ' +
-                           'FILO now has ' + gFILO.length + ' elements');
+            gLIFO.push(combinedPayload);
+            logger.verbose('Pushed ' + combinedPayload.length + ' byte payload onto LIFO. ' +
+                           'LIFO now has ' + gLIFO.length + ' elements');
             // Push sends 0x00 back to client when we are done
             client.end(Buffer.alloc(1, 0));
         }
@@ -156,16 +214,29 @@ var appServer = net.createServer(function(client) {
         var connections = appServer.connections;
         message += ' There are ' + appServer.connections + ' connections now. ';
         logger.verbose(message);
+
+        // remove myself from the list
+        logger.verbose('Deleting gClients[' + myUUID + ']');
+        delete gClients[myUUID];
     });
 
     // When client timeout.
     client.on('timeout', function () {
         logger.info('Client request time out. ');
+
+        // remove myself from the list
+        logger.verbose('Deleting gClients[' + myUUID + ']');
+        delete gClients[myUUID];
     })
 
     // When client error.
     client.on('error', function (error) {
-        logger.error('Client error: ' + JSON.stringify(error));
+        // Not sure if this is really an error, going to change it to warn
+        logger.warn('Client error: ' + JSON.stringify(error));
+
+        // remove myself from the list
+        logger.verbose('Deleting gClients[' + myUUID + ']');
+        delete gClients[myUUID];
     })
 });
 
@@ -190,24 +261,24 @@ appServer.listen(config.serverPort, function () {
 });
 
 // Create the diagnostic server listening on the specified port
-var diagnosticServer = net.createServer(function(client) {
+var diagnosticServer = net.createServer(function(diagClient) {
     var diagnosticInformation = {
         "appServerConnections":appServer.connections,
-        "FILOStackSize":gFILO.length
+        "LIFOStackSize":gLIFO.length
     }
 
     var diagnosticInformationJSON = JSON.stringify(diagnosticInformation);
     logger.verbose("Diagnostic server connections.  Sending data and closing connection. " + 
                    diagnosticInformationJSON);
-    client.end(diagnosticInformationJSON);
+    diagClient.end(diagnosticInformationJSON);
 
     // When client send data complete.
-    client.on('end', function () {
+    diagClient.on('end', function () {
         logger.verbose('Diagnostic connection closed');
     });
 
     // When client error.
-    client.on('error', function (error) {
+    diagClient.on('error', function (error) {
         logger.error('Diagnostic error: ' + JSON.stringify(error));
     })
 });
