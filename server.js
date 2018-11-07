@@ -20,10 +20,6 @@ commandLine
     })
     .parse(process.argv);
 
-if ( commandLine.help ) {
-    process.exit();
-}
-
 // Get timestamp for naming file
 var gTimestamp = new Date();
 
