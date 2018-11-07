@@ -136,33 +136,30 @@ var appServer = net.createServer(function(client) {
     // Configure client to read binary data
     client.setEncoding(null);
   
-    // TODO 
-    // Check and handle connections
-    // Direct access to this object is deprecated but still supported as of node v10.13.0, going
-    // to be lazy and use it.
-    var connections = appServer.connections;
+    // Check and handle connections.  Note this is done asynchronously, so client will be running
+    appServer.getConnections(function(error, connections) {
+        var message = myUUID + ':: Client connected: ' + JSON.stringify(clientInfo);
+        message += ' There are ' + connections + ' connections now. ';
+        logger.verbose(message);
 
-    var message = myUUID + ':: Client connected: ' + JSON.stringify(clientInfo);
-    message += ' There are ' + appServer.connections + ' connections now. ';
-    logger.verbose(message);
-
-    if ( connections > config.maxConnections) {
-        // Check if there are any old connections.  
-        var result = disconnectOldClient();
-        if ( result.disconnect ) {
-            // Go ahead and disconnect the old client and make room for this client
-            logger.verbose(result.uuid + ':: Old client found.  Disconnecting client.counter = ' + 
-                           gClients[result.uuid].counter);
-            gClients[result.uuid].client.end();
-            gClients[result.uuid].disconnect = true;
-        } else {
-            // No room, return a busy byte and close it out
-            logger.warn("Too many connections [%d >= %d] ... returning busy byte", 
-                        connections, config.maxConnections);
-            client.end(Buffer.alloc(1, 0xFF));
-            state = "disconnect";
+        if ( connections > config.maxConnections) {
+            // Check if there are any old connections.  
+            var result = disconnectOldClient();
+            if ( result.disconnect ) {
+                // Go ahead and disconnect the old client and make room for this client
+                logger.verbose(result.uuid + ':: Old client found.  Disconnecting client.counter = ' + 
+                               gClients[result.uuid].counter);
+                gClients[result.uuid].client.end();
+                gClients[result.uuid].disconnect = true;
+            } else {
+                // No room, return a busy byte and close it out
+                logger.warn("Too many connections [%d >= %d] ... returning busy byte", 
+                            connections, config.maxConnections);
+                client.end(Buffer.alloc(1, 0xFF));
+                state = "disconnect";
+            }
         }
-    }
+    });
 
     // Add myself to the list of clients
     // - timestamp holds the time this client was created
@@ -176,7 +173,6 @@ var appServer = net.createServer(function(client) {
         "disconnect" : false
     };
     logger.verbose('gClients[' + myUUID + '] = {timestamp: ' + now + ', counter: ' + gCounter + '}');
-
 
     // Process data
     client.on('data', function (data) {
@@ -295,10 +291,12 @@ var appServer = net.createServer(function(client) {
 
     // Client closing up
     client.on('end', function () {
-        var message = myUUID + ':: Client disconnected. State was [' + state + ']. ';
-        var connections = appServer.connections;
-        message += ' There are ' + appServer.connections + ' connections now. ';
-        logger.verbose(message);
+        // Log the number of current connections, will be done asynchronously
+        appServer.getConnections(function(error, connections) {
+            var message = myUUID + ':: Client disconnected. State was [' + state + ']. ';
+            message += ' There are ' + connections + ' connections now. ';
+            logger.verbose(message);
+        });
 
         // signal any blocking functions to exit
         exitLoop = true;
