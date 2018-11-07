@@ -155,20 +155,18 @@ var appServer = net.createServer(function(client) {
     }
 
     // Add myself to the list of clients
-    if ( state == 'start' ) {
-        // timestamp holds the time this client was created
-        // client is the client object
-        // counter is a human readable UUID (but note it will wrap at some point in the long future)
-        // disconnect is used to tell the client that it has been scheduled for termination
-        // disconnect is set to false here, and could be set to true in disconnectOldClient
-        gClients[myUUID] =  {
-            "timestamp" : now,
-            "client" : client,
-            "counter" : gCounter,
-            "disconnect" : false
-        };
-        logger.verbose('gClients[' + myUUID + '] = {timestamp: ' + now + ', counter: ' + gCounter + '}');
-    }
+    // - timestamp holds the time this client was created
+    // - client is the client object
+    // - counter is a human readable UUID (but note it will wrap at some point in the long future)
+    // - disconnect is used to tell the client that it has been scheduled for termination
+    gClients[myUUID] =  {
+        "timestamp" : now,
+        "client" : client,
+        "counter" : gCounter,
+        "disconnect" : false
+    };
+    logger.verbose('gClients[' + myUUID + '] = {timestamp: ' + now + ', counter: ' + gCounter + '}');
+
 
     // Process data
     client.on('data', function (data) {
