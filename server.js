@@ -1,5 +1,4 @@
 'use strict';
-
 //
 // Server code made easy due to node's TCP and Buffer libraries
 //
@@ -9,6 +8,21 @@
 //
 const config = require('./config.json');
 const environment = process.env.NODE_ENV || 'development';
+const commandLine = require('commander');
+
+// Configure command line options
+commandLine
+    .version('0.1.0')
+    .on('--help', function() {
+         console.log('')
+         console.log('  Please read README.md');
+         console.log('')
+    })
+    .parse(process.argv);
+
+if ( commandLine.help ) {
+    process.exit();
+}
 
 // Get timestamp for naming file
 var gTimestamp = new Date();
@@ -340,7 +354,12 @@ appServer.listen(config.serverPort, function () {
     });
 
 }).on('error', function(error) {
-        logger.error('App server listen error: ' + JSON.stringify(error));
+    logger.error('App server listen error: ' + JSON.stringify(error));
+    if ( error.errno == "EADDRINUSE" ) {
+        logger.error('***************************************************');
+        logger.error('*  ERROR - SOMETHING ELSE IS USING PORT ' + config.serverPort);
+        logger.error('***************************************************');
+    }
 });
 
 // Create the diagnostic server listening on the specified port
@@ -383,7 +402,12 @@ diagnosticServer.listen(config.diagnosticPort, function () {
     });
 
 }).on('error', function(error) {
-        logger.error('Diagnostic server listen error: ' + JSON.stringify(error));
+    logger.error('Diagnostic server listen error: ' + JSON.stringify(error));
+    if ( error.errno == "EADDRINUSE" ) {
+        logger.error('***************************************************');
+        logger.error('*  ERROR - SOMETHING ELSE IS USING PORT ' + config.diagnosticPort);
+        logger.error('***************************************************');
+    }
 });
 
 //

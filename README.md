@@ -6,6 +6,7 @@
 #   1. Install following dependencies:
 #      - npm install winston
 #      - npm install uuid
+#      - npm install commander
 #   2. Customize your config.json
 #   3. Make sure directory for logDirctory exists, e.g. prompt> mkdir logs/
 #
