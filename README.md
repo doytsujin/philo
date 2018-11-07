@@ -1,7 +1,6 @@
 # philo - stack-test.rb
 #
 # Implemented using node.js
-# net module is standard with node
 #
 # Installation Instructions
 #   1. Install following dependencies:
@@ -14,6 +13,12 @@
 #   1. Configure your NODE_ENV for the right level, e.g. prompt> export NODE_ENV=debugging
 #   2. Execute the code, e.g. prompt> node server.js
 # 
+# Environment configuration (see winston documentation for description of log levels)
+#  o production  - Only log errors, no console
+#  o testing     - Log up to info, no console
+#  o development - Log up to verbose, with console
+#  o debugging   - Log silly, with console
+#
 # Tested on macOS with the following:
 # - node v10.13.0
 # - prompt> sw_vers

@@ -13,8 +13,12 @@ const environment = process.env.NODE_ENV || 'development';
 // Get timestamp for naming file
 var gTimestamp = new Date();
 
+// Used to signal blocking functions it is time to go home
+var gKillMe = false;
+
 // Package to help manage unique ids for each client
 const uuidv4 = require('uuid/v4');
+const logFilename = config.logDirectory + '/server.log.' + gTimestamp.toISOString();
 
 // Winston is our logger, write to file
 // Always start off with log level info so that the basics are logged
@@ -28,7 +32,7 @@ var logger = winston.createLogger({
       winston.format.printf(info => `${info.timestamp} ${info.level}: ${info.message}`)
   ),
   transports: [
-    new winston.transports.File({ filename: config.logDirectory + '/server.log.' + gTimestamp.toISOString()}),
+    new winston.transports.File({ filename: logFilename }),
   ]
 });
 
@@ -73,12 +77,12 @@ function disconnectOldClient() {
     
     var earliestUUID = sorted[0];
     var earliestDate = gClients[earliestUUID].timestamp;
-    var now = new Date();
+    var now = Date.now();
     var elapsedTimeSeconds = (now-earliestDate)/1000;
     logger.verbose('Elapsed time: %d ms - %d ms = %f s', now, earliestDate, elapsedTimeSeconds);
 
     if ( elapsedTimeSeconds > config.staleConnectionPeriodSeconds ) {
-        logger.verbose('Disconnecting client.counter = ' + gClients[earliestUUID].counter);
+        logger.verbose(earliestUUID + ':: Disconnecting client.counter = ' + gClients[earliestUUID].counter);
         gClients[earliestUUID].client.end();
         disconnected = true;
     }
@@ -90,32 +94,42 @@ function disconnectOldClient() {
 //////////////////////////////////////////////
 // main
 //////////////////////////////////////////////
+
+//
+// Count how many times we have launched a client.  Useful for debugging (for humans who prefer
+// not to use UUIDs for everything)
+//
 var gCounter = 0;
 
 // Create application server, invoked on client connect
 var net = require('net');
 var appServer = net.createServer(function(client) {
     var clientInfo = client.address();
-    var message = 'Client connected: ' + JSON.stringify(clientInfo);
     var myUUID = uuidv4();
-    var now = new Date();
-
-    // This ensures we are reading binary data
-    client.setEncoding(null);
-    //client.setTimeout(1000);
+    var now = Date.now();
 
     // Initialize variables used to manage stack and state
     var state = 'start';
     var payloadBytesRead = 0;
     var payloadLength = 0;
     var payloadList = [];
+
+    // Configure client as necessary
+    // - This ensures we are reading binary data
+    client.setEncoding(null);
+    // - Sets timeout to 1s
+    //client.setTimeout(1000);
   
+    // TODO 
     // Check and handle connections
     // Direct access to this object is deprecated but still supported as of node v10.13.0, going
     // to be lazy and use it.
     var connections = appServer.connections;
+
+    var message = myUUID + ':: Client connected: ' + JSON.stringify(clientInfo);
     message += ' There are ' + appServer.connections + ' connections now. ';
     logger.verbose(message);
+
     if ( connections > config.maxConnections) {
         // Check if there are any old connections.  If yes, then delete it and make space.  Otherwise
         // return a busy byte
@@ -127,14 +141,15 @@ var appServer = net.createServer(function(client) {
         }
     }
 
-    // Add myself to the list of clients
+    // Add myself to the list of clients, then increment absolute counter
     if ( state == 'start' ) {
         gClients[myUUID] =  {
             "timestamp" : now,
             "client" : client,
-            "counter" : gCounter++
+            "counter" : gCounter
         };
-        logger.verbose('Added gClients[%s].timestamp = %d', myUUID, gClients[myUUID].timestamp);
+        logger.verbose('gClients[' + myUUID + '] = {timestamp: ' + now + ', counter: ' + gCounter + '}');
+        gCounter++;
     }
 
     // Process data
@@ -148,21 +163,41 @@ var appServer = net.createServer(function(client) {
         // If msb is 1 then this is a pop, else a push
         if ( (state == 'start') && (buffer[0] & 0x80)) {
             state = 'pop';
+            var checkStackEmptyIteration = 0;
 
-            var payload = gLIFO.pop();
-            var length = payload.length;
-            logger.verbose(myUUID + ':: Popped ' + length + ' byte payload from LIFO. ' +
-                           'LIFO now has ' + gLIFO.length + ' elements');
+            // Block on pop if gLIFO is empty.  Retry every millisecond.
+            // Will block indefinitely until something is available
+            function checkStackEmpty() {
+                if ( gKillMe ) {  
+                    // Server wants to die, let it
+                } else if ( gLIFO.length ) {
+                    // Something on the stack!! Send it...
+                    var payload = gLIFO.pop();
+                    var length = payload.length;
+                    // payload appears to always be ASCII, useful for debugging
+                    logger.verbose(myUUID + ':: Popped ' + length + ' byte payload [' + payload.toString() +
+                                   '] from LIFO. ' + 'LIFO now has ' + gLIFO.length + ' elements');
 
-            // create a buffer of length buffer.length + 1
-            var sendBuffer = Buffer.alloc(length+1, 0);
-            // set header byte - msb is 0, length is payload length
-            sendBuffer[0] = payload.length & 0x7F;
-            // copy sendBuffer into payload starting at payload[1]
-            payload.copy(sendBuffer, 1);
+                    // create a buffer of length buffer.length + 1
+                    var sendBuffer = Buffer.alloc(length+1, 0);
+                    // set header byte - msb is 0, length is payload length
+                    sendBuffer[0] = payload.length & 0x7F;
+                    // copy sendBuffer into payload starting at payload[1]
+                    payload.copy(sendBuffer, 1);
 
-            logger.verbose(myUUID + ':: Sending response: [' + sendBuffer.toString('hex') + ']');
-            client.end(sendBuffer);
+                    logger.verbose(myUUID + ':: Sending response: [' + sendBuffer.toString('hex') + ']');
+                    client.end(sendBuffer);
+                } else {
+                    if ( !(++checkStackEmptyIteration % 1000) ) {
+                        logger.verbose(myUUID + ':: Stack is empty, waiting for client to push...' + 
+                                       checkStackEmptyIteration);
+                    }
+                    setTimeout(checkStackEmpty, 1);
+                }
+            }
+            // Actually do it
+            checkStackEmpty();
+
         } else if (state == 'push') {
             // handle serialized pushes
             payloadList.push(buffer);
@@ -197,19 +232,40 @@ var appServer = net.createServer(function(client) {
                          '. Cowardly ignoring data but continuing.');
         }
 
+        // This is where the push is actually sent, whether data was serialized or not
+        // (or specifically, whether data was serialized in more than one packet)
         if (state == 'done') {
+            // Merge our serialized data
             var combinedPayload = Buffer.concat(payloadList);
-            gLIFO.push(combinedPayload);
-            logger.verbose(myUUID + ':: Pushed ' + combinedPayload.length + ' byte payload onto LIFO. ' +
-                           'LIFO now has ' + gLIFO.length + ' elements');
-            // Push sends 0x00 back to client when we are done
-            client.end(Buffer.alloc(1, 0));
+            var checkStackFullIteration = 0;
+
+            // Block on push if gLIFO has more than maxStackSize elements.  Retry every millisecond.
+            // Will block indefinitely until something is popped
+            function checkStackFull() {
+                if ( gKillMe ) {  
+                    // Server wants to die, let it
+                } else if ( gLIFO.length < config.maxStackSize ) {
+                    gLIFO.push(combinedPayload);
+                    logger.verbose(myUUID + ':: Pushed ' + combinedPayload.length + ' byte payload [' + 
+                                   combinedPayload.toString()+ '] onto LIFO. ' +
+                                   'LIFO now has ' + gLIFO.length + ' elements');
+                    // Push sends 0x00 back to client when we are done
+                    client.end(Buffer.alloc(1, 0));
+                } else {
+                    if ( !(++checkStackFullIteration % 1000) ) {
+                        logger.verbose(myUUID + ':: Stack is full, waiting for client to pop...');
+                    }
+                    setTimeout(checkStackFull, 1);
+                }
+            }
+            // Actually do it
+            checkStackFull();
         }
     });
 
-    // When client send data complete.
+    // Client closing up
     client.on('end', function () {
-        var message = 'Client disconnected. State was [' + state + ']. ';
+        var message = myUUID + ':: Client disconnected. State was [' + state + ']. ';
         var connections = appServer.connections;
         message += ' There are ' + appServer.connections + ' connections now. ';
         logger.verbose(message);
@@ -231,7 +287,7 @@ var appServer = net.createServer(function(client) {
     // When client error.
     client.on('error', function (error) {
         // Not sure if this is really an error, going to change it to warn
-        logger.warn('Client error: ' + JSON.stringify(error));
+        logger.warn(myUUID + ':: Client error: ' + JSON.stringify(error));
 
         // remove myself from the list
         logger.verbose('Deleting gClients[' + myUUID + ']');
@@ -302,7 +358,9 @@ diagnosticServer.listen(config.diagnosticPort, function () {
         logger.error('Diagnostic server listen error: ' + JSON.stringify(error));
 });
 
+//
 // Capture SIGINT and SIGKILL for a clean exit
+//
 function shutdown() {
     var diagnosticInformation = {
         "appServerConnections":appServer.connections,
@@ -312,8 +370,13 @@ function shutdown() {
     var diagnosticInformationJSON = JSON.stringify(diagnosticInformation);
     logger.verbose("Final tallies: " + diagnosticInformationJSON);
 
+    // Signal running events to die, then signal servers to close
+    gKillMe = true;
     appServer.close();
     diagnosticServer.close();
+
+    // Extremely useful printout for lessing file during debug
+    logger.verbose('Wrote ' + logFilename);
 }
 
 process.on('SIGTERM', function() {
@@ -324,7 +387,8 @@ process.on('SIGINT', function() {
     logger.warn('SIGINT captured, shutting down...');
     shutdown();
 });
-process.on('uncaughtException', function() {
-    logger.warn('uncaughtException captured, shutting down...');
+process.on('uncaughtException', function(error) {
+    logger.error('UncaughtException::' + error.message + '::' + error.stack);
+    logger.error('Shutting down...');
     shutdown();
 });
