@@ -14,6 +14,7 @@
 #      - e.g. prompt> export NODE_ENV=debugging
 #      - default is development, see below for options
 #   2. Execute the code, e.g. prompt> node server.js
+#   3. Kill gracefully w/ CTRL+c or kill (or murder it, that's fine too)
 # 
 # Environment configuration (see winston documentation for description of log levels)
 #  o production  - Only log errors, no console

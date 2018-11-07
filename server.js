@@ -66,15 +66,22 @@ var gClients = {};
 //
 // \fn bool oldClientDeleted
 // \brief Go through gClients object, find the oldest object, determine if it is older than allowed, and delete it
+// \returns Result.uuid is to be disconnected if result.disconnected is true
 //
 
 function disconnectOldClient() {
-    var disconnected = false;
+    var result = {
+        "disconnect" : false,
+        "uuid" : ""
+    };
 
     // sort the objects oldest to newest timestamp, with oldest at index 0.
-    // TODO - optimize
+    // TODO - optimize.  Probably w/ a database link or something that has benefits of both
+    // associative arrays (access by key as in key=>value) and arrays (sort) since JavaScript
+    // doesn't let you have your cake and eat it too.
     var sorted = Object.keys(gClients).sort(function(a,b){return gClients[a].timestamp-gClients[b].timestamp})
     
+    // The oldest will be index 0
     var earliestUUID = sorted[0];
     var earliestDate = gClients[earliestUUID].timestamp;
     var now = Date.now();
@@ -82,14 +89,12 @@ function disconnectOldClient() {
     logger.verbose('Elapsed time: %d ms - %d ms = %f s', now, earliestDate, elapsedTimeSeconds);
 
     if ( elapsedTimeSeconds > config.staleConnectionPeriodSeconds ) {
-        logger.verbose(earliestUUID + ':: Disconnecting client.counter = ' + gClients[earliestUUID].counter);
-        gClients[earliestUUID].client.end();
-        disconnected = true;
+        result.disconnect = true;
+        result.uuid = earliestUUID;
     }
 
-    return disconnected;
+    return result;
 }
-
 
 //////////////////////////////////////////////
 // main
@@ -118,11 +123,8 @@ var appServer = net.createServer(function(client) {
     var payloadList = [];
     var exitLoop = false;
 
-    // Configure client as necessary
-    // - This ensures we are reading binary data
+    // Configure client to read binary data
     client.setEncoding(null);
-    // - Sets timeout to 1s
-    //client.setTimeout(1000);
   
     // TODO 
     // Check and handle connections
@@ -135,33 +137,50 @@ var appServer = net.createServer(function(client) {
     logger.verbose(message);
 
     if ( connections > config.maxConnections) {
-        // Check if there are any old connections.  If yes, then delete it and make space.  Otherwise
-        // return a busy byte
-        if ( !disconnectOldClient() ) {
+        // Check if there are any old connections.  
+        var result = disconnectOldClient();
+        if ( result.disconnect ) {
+            // Go ahead and disconnect the old client and make room for this client
+            logger.verbose(result.uuid + ':: Old client found.  Disconnecting client.counter = ' + 
+                           gClients[result.uuid].counter);
+            gClients[result.uuid].client.end();
+            gClients[result.uuid].disconnect = true;
+        } else {
+            // No room, return a busy byte and close it out
             logger.warn("Too many connections [%d >= %d] ... returning busy byte", 
                         connections, config.maxConnections);
             client.end(Buffer.alloc(1, 0xFF));
-            state = "busy";
+            state = "disconnect";
         }
     }
 
-    // Add myself to the list of clients, then increment absolute counter
+    // Add myself to the list of clients
     if ( state == 'start' ) {
+        // timestamp holds the time this client was created
+        // client is the client object
+        // counter is a human readable UUID (but note it will wrap at some point in the long future)
+        // disconnect is used to tell the client that it has been scheduled for termination
+        // disconnect is set to false here, and could be set to true in disconnectOldClient
         gClients[myUUID] =  {
             "timestamp" : now,
             "client" : client,
-            "counter" : gCounter
+            "counter" : gCounter,
+            "disconnect" : false
         };
         logger.verbose('gClients[' + myUUID + '] = {timestamp: ' + now + ', counter: ' + gCounter + '}');
     }
 
     // Process data
     client.on('data', function (data) {
-        // Print received client data and length.
-	// Check if amount of data sent matches expected amount of data sent
-
+        // don't do anything if scheduled for termination, node will get to us eventually
 	var buffer = Buffer.from(data);
-        logger.silly(myUUID + ':: Received ' + buffer.length + ' bytes: [' + buffer.toString('hex') + ']');
+        logger.silly(myUUID + ':: Received ' + buffer.length + ' byte(s): [' + buffer.toString('hex') + ']');
+
+        // This was scheduled for deletion but the event queue hasn't come around yet to 
+        // deleting me, so just pass through
+        if ( gClients[myUUID].disconnect ) {
+            state = "disconnect";
+        }
 
         // If msb is 1 then this is a pop, else a push
         if ( (state == 'start') && (buffer[0] & 0x80)) {
@@ -228,7 +247,7 @@ var appServer = net.createServer(function(client) {
                 logger.silly(myUUID + ':: payload serialized - got %d of %d bytes', 
                              payloadBytesRead, payloadLength);
             }
-        } else if (state == 'busy') {
+        } else if (state == 'disconnect') {
             // Going to ignore the data and let this die
         } else {
             logger.error(myUUID + ':: Unknown state on data: ' + state + 
