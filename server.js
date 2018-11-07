@@ -108,11 +108,15 @@ var appServer = net.createServer(function(client) {
     var myUUID = uuidv4();
     var now = Date.now();
 
+    // Increment the absolute number of clients we have seen to date (easier for ocular parsing than UUID)
+    gCounter++;
+
     // Initialize variables used to manage stack and state
     var state = 'start';
     var payloadBytesRead = 0;
     var payloadLength = 0;
     var payloadList = [];
+    var exitLoop = false;
 
     // Configure client as necessary
     // - This ensures we are reading binary data
@@ -149,7 +153,6 @@ var appServer = net.createServer(function(client) {
             "counter" : gCounter
         };
         logger.verbose('gClients[' + myUUID + '] = {timestamp: ' + now + ', counter: ' + gCounter + '}');
-        gCounter++;
     }
 
     // Process data
@@ -168,7 +171,7 @@ var appServer = net.createServer(function(client) {
             // Block on pop if gLIFO is empty.  Retry every millisecond.
             // Will block indefinitely until something is available
             function checkStackEmpty() {
-                if ( gKillMe ) {  
+                if ( gKillMe || exitLoop ) {  
                     // Server wants to die, let it
                 } else if ( gLIFO.length ) {
                     // Something on the stack!! Send it...
@@ -242,7 +245,7 @@ var appServer = net.createServer(function(client) {
             // Block on push if gLIFO has more than maxStackSize elements.  Retry every millisecond.
             // Will block indefinitely until something is popped
             function checkStackFull() {
-                if ( gKillMe ) {  
+                if ( gKillMe || exitLoop ) {  
                     // Server wants to die, let it
                 } else if ( gLIFO.length < config.maxStackSize ) {
                     gLIFO.push(combinedPayload);
@@ -270,6 +273,9 @@ var appServer = net.createServer(function(client) {
         message += ' There are ' + appServer.connections + ' connections now. ';
         logger.verbose(message);
 
+        // signal any blocking functions to exit
+        exitLoop = true;
+
         // remove myself from the list
         logger.verbose('Deleting gClients[' + myUUID + ']');
         delete gClients[myUUID];
@@ -279,6 +285,9 @@ var appServer = net.createServer(function(client) {
     client.on('timeout', function () {
         logger.info('Client request time out. ');
 
+        // signal any blocking functions to exit
+        exitLoop = true;
+
         // remove myself from the list
         logger.verbose('Deleting gClients[' + myUUID + ']');
         delete gClients[myUUID];
@@ -286,8 +295,10 @@ var appServer = net.createServer(function(client) {
 
     // When client error.
     client.on('error', function (error) {
-        // Not sure if this is really an error, going to change it to warn
-        logger.warn(myUUID + ':: Client error: ' + JSON.stringify(error));
+        logger.error(myUUID + ':: Client error: ' + JSON.stringify(error));
+
+        // signal any blocking functions to exit
+        exitLoop = true;
 
         // remove myself from the list
         logger.verbose('Deleting gClients[' + myUUID + ']');

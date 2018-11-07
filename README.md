@@ -10,7 +10,9 @@
 #   3. Make sure directory for logDirctory exists, e.g. prompt> mkdir logs/
 #
 # Execution Instructions
-#   1. Configure your NODE_ENV for the right level, e.g. prompt> export NODE_ENV=debugging
+#   1. Configure your NODE_ENV for the right logging level: 
+#      - e.g. prompt> export NODE_ENV=debugging
+#      - default is development, see below for options
 #   2. Execute the code, e.g. prompt> node server.js
 # 
 # Environment configuration (see winston documentation for description of log levels)
