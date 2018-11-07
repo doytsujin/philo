@@ -22,6 +22,10 @@
 #  o development - Log up to verbose, with console
 #  o debugging   - Log silly, with console
 #
+# Diagnostic instructions
+#   1. The diagnostic port is configured in config.json
+#   2. I like running it with >telnet <ipAddr> <port>
+#
 # Tested on macOS with the following:
 # - node v10.13.0
 # - prompt> sw_vers
