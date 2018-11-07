@@ -86,9 +86,6 @@ function disconnectOldClient() {
     };
 
     // sort the objects oldest to newest timestamp, with oldest at index 0.
-    // TODO - optimize.  Probably w/ a database link or something that has benefits of both
-    // associative arrays (access by key as in key=>value) and arrays (sort) since JavaScript
-    // doesn't let you have your cake and eat it too.
     var sorted = Object.keys(gClients).sort(function(a,b){return gClients[a].timestamp-gClients[b].timestamp})
     
     // The oldest will be index 0
