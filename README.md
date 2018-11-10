@@ -33,8 +33,8 @@ See [winston documentation](https://github.com/winstonjs/winston) for descriptio
 * `$ node --version` `v10.13.0`
 * `$ sw_vers`
 ```
-    ProductName:	        Mac OS X
-    ProductVersion:      10.14
-    BuildVersion:        18A391
+      ProductName:         Mac OS X
+      ProductVersion:      10.14
+      BuildVersion:        18A391
 ```
 * `$ruby --version` `2.3.7p456 (2018-03-28 revision 63024) [universal.x86_64-darwin18]`
