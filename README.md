@@ -1,7 +1,6 @@
 # philo - stack-test.rb
 Implemented using node.js
 
-
 ### Installation Instructions
 1. Install dependencies witn `npm install`
 2. Customize your config.json
