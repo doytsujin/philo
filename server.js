@@ -74,7 +74,7 @@ var gClients = {};
 //////////////////////////////////////////////
 
 //
-// \fn bool oldClientDeleted
+// disconnectOldClient
 // \brief Go through gClients object, find the oldest object, determine if it is older than allowed, and delete it
 // \returns Result.uuid is to be disconnected if result.disconnected is true
 //
@@ -111,7 +111,7 @@ function disconnectOldClient() {
 // Count how many times we have launched a client.  Useful for debugging (for humans who prefer
 // not to use UUIDs for everything)
 //
-var gCounter = 0;
+var gConnectionsMade = 0;
 
 // Create application server, invoked on client connect
 var net = require('net');
@@ -121,7 +121,7 @@ var appServer = net.createServer(function(client) {
     var now = Date.now();
 
     // Increment the absolute number of clients we have seen to date (easier for ocular parsing than UUID)
-    gCounter++;
+    gConnectionsMade++;
 
     // Initialize variables used to manage stack and state
     var state = 'start';
@@ -166,10 +166,10 @@ var appServer = net.createServer(function(client) {
     gClients[myUUID] =  {
         "timestamp" : now,
         "client" : client,
-        "counter" : gCounter,
+        "counter" : gConnectionsMade,
         "disconnect" : false
     };
-    logger.verbose('gClients[' + myUUID + '] = {timestamp: ' + now + ', counter: ' + gCounter + '}');
+    logger.verbose('gClients[' + myUUID + '] = {timestamp: ' + now + ', counter: ' + gConnectionsMade + '}');
 
     // Process data
     client.on('data', function (data) {
@@ -357,7 +357,8 @@ appServer.listen(config.serverPort, function () {
 var diagnosticServer = net.createServer(function(diagClient) {
     var diagnosticInformation = {
         "appServerConnections":appServer.connections,
-        "LIFOStackSize":gLIFO.length
+        "LIFOStackSize":gLIFO.length,
+        "gConnectionsMade":gConnectionsMade
     }
 
     var diagnosticInformationJSON = JSON.stringify(diagnosticInformation);
@@ -402,7 +403,7 @@ diagnosticServer.listen(config.diagnosticPort, function () {
 });
 
 //
-// Capture SIGINT and SIGKILL for a clean exit
+// Capture SIGINT and SIGTERM for a clean exit
 //
 function shutdown() {
     var diagnosticInformation = {
@@ -422,12 +423,12 @@ function shutdown() {
     logger.verbose('Wrote ' + logFilename);
 }
 
-process.on('SIGTERM', function() {
-    logger.warn('SIGTERM captured, shutting down...');
-    shutdown();
-});
 process.on('SIGINT', function() {
     logger.warn('SIGINT captured, shutting down...');
+    shutdown();
+});
+process.on('SIGTERM', function() {
+    logger.warn('SIGTERM captured, shutting down...');
     shutdown();
 });
 process.on('uncaughtException', function(error) {
