@@ -21,10 +21,10 @@ commandLine
     .parse(process.argv);
 
 // Get timestamp for naming file
-var gTimestamp = new Date();
+let gTimestamp = new Date();
 
 // Used to signal blocking functions it is time to go home
-var gKillMe = false;
+let gKillMe = false;
 
 // Package to help manage unique ids for each client
 const uuidv4 = require('uuid/v4');
@@ -32,8 +32,8 @@ const logFilename = config.logDirectory + '/server.log.' + gTimestamp.toISOStrin
 
 // Winston is our logger, write to file
 // Always start off with log level info so that the basics are logged
-var winston = require('winston');
-var logger = winston.createLogger({
+let winston = require('winston');
+let logger = winston.createLogger({
   level: 'info',
   format: winston.format.combine( 
       winston.format.timestamp(),
@@ -59,14 +59,14 @@ logger.info("Setting log level to " + logging.logLevel);
 logger.level = logging.logLevel;
 
 //////////////////////////////////////////////
-// Global variables
+// Global letiables
 //////////////////////////////////////////////
 
 // Our LIFO stack
-var gLIFO = [];
+let gLIFO = [];
 
 // Our client list
-var gClients = {};
+let gClients = {};
 
 
 //////////////////////////////////////////////
@@ -80,19 +80,19 @@ var gClients = {};
 //
 
 function disconnectOldClient() {
-    var result = {
+    let result = {
         "disconnect" : false,
         "uuid" : ""
     };
 
     // sort the objects oldest to newest timestamp, with oldest at index 0.
-    var sorted = Object.keys(gClients).sort(function(a,b){return gClients[a].timestamp-gClients[b].timestamp})
+    let sorted = Object.keys(gClients).sort(function(a,b){return gClients[a].timestamp-gClients[b].timestamp})
     
     // The oldest will be index 0
-    var earliestUUID = sorted[0];
-    var earliestDate = gClients[earliestUUID].timestamp;
-    var now = Date.now();
-    var elapsedTimeSeconds = (now-earliestDate)/1000;
+    let earliestUUID = sorted[0];
+    let earliestDate = gClients[earliestUUID].timestamp;
+    let now = Date.now();
+    let elapsedTimeSeconds = (now-earliestDate)/1000;
     logger.verbose('Elapsed time: %d ms - %d ms = %f s', now, earliestDate, elapsedTimeSeconds);
 
     if ( elapsedTimeSeconds > config.staleConnectionPeriodSeconds ) {
@@ -111,37 +111,37 @@ function disconnectOldClient() {
 // Count how many times we have launched a client.  Useful for debugging (for humans who prefer
 // not to use UUIDs for everything)
 //
-var gConnectionsMade = 0;
+let gConnectionsMade = 0;
 
 // Create application server, invoked on client connect
-var net = require('net');
-var appServer = net.createServer(function(client) {
-    var clientInfo = client.address();
-    var myUUID = uuidv4();
-    var now = Date.now();
+let net = require('net');
+let appServer = net.createServer(function(client) {
+    let clientInfo = client.address();
+    let myUUID = uuidv4();
+    let now = Date.now();
 
     // Increment the absolute number of clients we have seen to date (easier for ocular parsing than UUID)
     gConnectionsMade++;
 
-    // Initialize variables used to manage stack and state
-    var state = 'start';
-    var payloadBytesRead = 0;
-    var payloadLength = 0;
-    var payloadList = [];
-    var exitLoop = false;
+    // Initialize letiables used to manage stack and state
+    let state = 'start';
+    let payloadBytesRead = 0;
+    let payloadLength = 0;
+    let payloadList = [];
+    let exitLoop = false;
 
     // Configure client to read binary data
     client.setEncoding(null);
   
     // Check and handle connections.  Note this is done asynchronously, so client will be running
     appServer.getConnections(function(error, connections) {
-        var message = myUUID + ':: Client connected: ' + JSON.stringify(clientInfo);
+        let message = myUUID + ':: Client connected: ' + JSON.stringify(clientInfo);
         message += ' There are ' + connections + ' connections now. ';
         logger.verbose(message);
 
         if ( connections > config.maxConnections) {
             // Check if there are any old connections.  
-            var result = disconnectOldClient();
+            let result = disconnectOldClient();
             if ( result.disconnect ) {
                 // Go ahead and disconnect the old client and make room for this client
                 logger.verbose(result.uuid + ':: Old client found.  Disconnecting client.counter = ' + 
@@ -174,7 +174,7 @@ var appServer = net.createServer(function(client) {
     // Process data
     client.on('data', function (data) {
         // don't do anything if scheduled for termination, node will get to us eventually
-	var buffer = Buffer.from(data);
+	let buffer = Buffer.from(data);
         logger.silly(myUUID + ':: Received ' + buffer.length + ' byte(s): [' + buffer.toString('hex') + ']');
 
         // This was scheduled for deletion but the event queue hasn't come around yet to 
@@ -186,7 +186,7 @@ var appServer = net.createServer(function(client) {
         // If msb is 1 then this is a pop, else a push
         if ( (state == 'start') && (buffer[0] & 0x80)) {
             state = 'pop';
-            var checkStackEmptyIteration = 0;
+            let checkStackEmptyIteration = 0;
 
             // Block on pop if gLIFO is empty.  Retry every millisecond.
             // Will block indefinitely until something is available
@@ -195,14 +195,14 @@ var appServer = net.createServer(function(client) {
                     // Server wants to die, let it
                 } else if ( gLIFO.length ) {
                     // Something on the stack!! Send it...
-                    var payload = gLIFO.pop();
-                    var length = payload.length;
+                    let payload = gLIFO.pop();
+                    let length = payload.length;
                     // payload appears to always be ASCII, useful for debugging
                     logger.verbose(myUUID + ':: Popped ' + length + ' byte payload [' + payload.toString() +
                                    '] from LIFO. ' + 'LIFO now has ' + gLIFO.length + ' elements');
 
                     // create a buffer of length buffer.length + 1
-                    var sendBuffer = Buffer.alloc(length+1, 0);
+                    let sendBuffer = Buffer.alloc(length+1, 0);
                     // set header byte - msb is 0, length is payload length
                     sendBuffer[0] = payload.length & 0x7F;
                     // copy sendBuffer into payload starting at payload[1]
@@ -259,8 +259,8 @@ var appServer = net.createServer(function(client) {
         // (or specifically, whether data was serialized in more than one packet)
         if (state == 'done') {
             // Merge our serialized data
-            var combinedPayload = Buffer.concat(payloadList);
-            var checkStackFullIteration = 0;
+            let combinedPayload = Buffer.concat(payloadList);
+            let checkStackFullIteration = 0;
 
             // Block on push if gLIFO has more than maxStackSize elements.  Retry every millisecond.
             // Will block indefinitely until something is popped
@@ -290,7 +290,7 @@ var appServer = net.createServer(function(client) {
     client.on('end', function () {
         // Log the number of current connections, will be done asynchronously
         appServer.getConnections(function(error, connections) {
-            var message = myUUID + ':: Client disconnected. State was [' + state + ']. ';
+            let message = myUUID + ':: Client disconnected. State was [' + state + ']. ';
             message += ' There are ' + connections + ' connections now. ';
             logger.verbose(message);
         });
@@ -331,8 +331,8 @@ var appServer = net.createServer(function(client) {
 // Create the app server listening on the specified port
 appServer.listen(config.serverPort, function () {
     // Get server address info.
-    var serverInfo = appServer.address();
-    var serverInfoJson = JSON.stringify(serverInfo);
+    let serverInfo = appServer.address();
+    let serverInfoJson = JSON.stringify(serverInfo);
 
     logger.info('App server started: ' + serverInfoJson);
 
@@ -354,14 +354,14 @@ appServer.listen(config.serverPort, function () {
 });
 
 // Create the diagnostic server listening on the specified port
-var diagnosticServer = net.createServer(function(diagClient) {
-    var diagnosticInformation = {
+let diagnosticServer = net.createServer(function(diagClient) {
+    let diagnosticInformation = {
         "appServerConnections":appServer.connections,
         "LIFOStackSize":gLIFO.length,
         "gConnectionsMade":gConnectionsMade
     }
 
-    var diagnosticInformationJSON = JSON.stringify(diagnosticInformation);
+    let diagnosticInformationJSON = JSON.stringify(diagnosticInformation);
     logger.verbose("Diagnostic server connections.  Sending data and closing connection. " + 
                    diagnosticInformationJSON);
     diagClient.end(diagnosticInformationJSON);
@@ -380,8 +380,8 @@ var diagnosticServer = net.createServer(function(diagClient) {
 // Create the app server listening on the specified port
 diagnosticServer.listen(config.diagnosticPort, function () {
     // Get server address info.
-    var serverInfo = diagnosticServer.address();
-    var serverInfoJson = JSON.stringify(serverInfo);
+    let serverInfo = diagnosticServer.address();
+    let serverInfoJson = JSON.stringify(serverInfo);
 
     logger.info('Diagnostic server started: ' + serverInfoJson);
 
@@ -406,12 +406,12 @@ diagnosticServer.listen(config.diagnosticPort, function () {
 // Capture SIGINT and SIGTERM for a clean exit
 //
 function shutdown() {
-    var diagnosticInformation = {
+    let diagnosticInformation = {
         "appServerConnections":appServer.connections,
         "LIFOStackSize":gLIFO.length
     }
 
-    var diagnosticInformationJSON = JSON.stringify(diagnosticInformation);
+    let diagnosticInformationJSON = JSON.stringify(diagnosticInformation);
     logger.verbose("Final tallies: " + diagnosticInformationJSON);
 
     // Signal running events to die, then signal servers to close
